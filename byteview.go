@@ -11,7 +11,7 @@ func (b ByteView) Len() int {
 
 func (b ByteView) ByteSLice() []byte {
 	return cloneBytes(b.b)
-}
+}//wejopeenfferwr
 
 func (b ByteView) String() string {
 	return string(b.b)
