@@ -1,248 +1,97 @@
-【代码随想录知识星球】项目分享-缓存系统（Go）
 
 # KamaCache
 
-## 核心特性
+**本项目目前之前[知识星球](https://programmercarl.com/other/kstar.html)里维护**
 
-### 1. 分布式架构
-- 基于 etcd 的服务注册与发现
-- 一致性哈希实现负载均衡
-- 节点自动发现和同步
-- 支持动态扩缩容
+分布式缓存（Go）这个项目在 23年就在星球里发布了。
 
-### 2. 缓存功能
-- 支持 LRU 缓存策略
-- 可配置过期时间
-- 支持批量操作
-- 防止缓存击穿
-- 支持按组划分缓存空间
+如今，对这个项目做了第二版优化。
 
-### 3. 高性能设计
-- 并发安全
-- 异步数据同步
-- 单飞机制避免缓存击穿
-- gRPC 通信
+对代码讲解，面试问题，和简历写法，都做了补充和完善。
 
-## 快速开始
+本项目今天在[知识星球](https://programmercarl.com/other/kstar.html)里正式发布：
 
-### 1. 安装
-```bash
-go get github.com/youngyangyang04/KamaCache-Go
-```
+![image](https://file1.kamacoder.com/i/web/20250414102441.png)
 
-### 2. 启动 etcd
-```bash
-# 使用 Docker 启动 etcd
-docker run -d --name etcd \
-  -p 2379:2379 \
-  quay.io/coreos/etcd:v3.5.0 \
-  etcd --advertise-client-urls http://0.0.0.0:2379 \
-  --listen-client-urls http://0.0.0.0:2379
-```
+## 什么是缓存
 
-### 3. 运行实例
+缓存是将高频访问的数据暂存到内存中，是加速数据访问的存储，降低延迟，提高吞吐率的利器。
 
-详情见测试 demo：[example/test.go](example/test.go)
+## 为什么要实现缓存系统
 
+因缓存的使用相关需求，通过牺牲一部分服务器内存，减少对磁盘或者数据库资源进行直接读写，可换取更快响应速度。
 
-### 4. 多节点部署
-```bash
-# 启动节点 A
-go run example/test.go -port 8001 -node A
+尤其是处理高并发的场景，负责存储经常访问的数据，通过设计合理的缓存机制提高资源的访问效率。
 
-# 启动节点 B
-go run example/test.go -port 8002 -node B
+由于服务器的内存是有限的，我们不能把所有数据都存放在内存中，因此需要一种机制来决定当使用内存超过一定标准时，应该删除哪些数据，这就涉及到缓存淘汰策略的选择。
 
-# 启动节点 C
-go run example/test.go -port 8003 -node C
-```
+## 在什么地方加缓存
 
-### 5. 测试结果
+距离用户越近，缓存能够发挥的效果越好。
 
-A 进程：
+缓存的顺序：用户请求->HTTP缓存->CDN缓存->代理服务器缓存->进程内缓存->分布式缓存->数据库
 
-```bash
-go run example/test.go -port 8001 -node A  
-2025/04/08 10:16:36 [节点A] 启动，地址: :8001
-INFO[0000] Created cache group [test] with cacheBytes=2097152, expiration=0s 
-INFO[0000] [KamaCache] registered peers for group [test] 
-2025/04/08 10:16:36 [节点A] 等待节点注册...
-2025/04/08 10:16:36 [节点A] 开始启动服务...
-INFO[0000] Server starting at :8001                     
-INFO[0000] Service registered: kama-cache at 172.22.152.216:8001 
-INFO[0000] Successfully created client for 172.22.152.216:8001 
-INFO[0000] New service discovered at 172.22.152.216:8001 
-INFO[0002] Successfully created client for 172.22.152.216:8002 
-INFO[0002] New service discovered at 172.22.152.216:8002 
+根据 缓存的存储方式 和 应用的耦合度，缓存可以分为 本地缓存（Local Cache） 和 分布式缓存（Distributed Cache）。
 
-=== 节点A：设置本地数据 ===
-INFO[0005] Cache initialized with type lru2, max bytes: 2097152 
-节点A: 设置键 key_A 成功
-2025/04/08 10:16:41 [节点A] 等待其他节点准备就绪...
-INFO[0005] grpc set request resp: value:"这是节点A的数据"      
-INFO[0006] Successfully created client for 172.22.152.216:8003 
-INFO[0006] New service discovered at 172.22.152.216:8003 
-2025/04/08 10:17:11 当前已发现的节点:
-2025/04/08 10:17:11 - 172.22.152.216:8002
-2025/04/08 10:17:11 - 172.22.152.216:8003
-2025/04/08 10:17:11 - 172.22.152.216:8001
+本地缓存更注重 访问速度，而分布式缓存则关注 数据一致性和扩展性。
 
-=== 节点A：获取本地数据 ===
-直接查询本地缓存...
-缓存统计: map[cache_closed:false cache_hit_rate:0 cache_hits:0 cache_initialized:true cache_misses:0 cache_size:2 closed:false expiration:0s loader_errors:0 loader_hits:0 loads:0 local_hits:0 local_misses:0 name:test peets:0 peer_misses:0]
-项目有效，将其移至二级缓存
-节点A: 获取本地键 key_A 成功: 这是节点A的数据
+## 分布式缓存（Distributed Cache）
 
-=== 节点A：尝试获取远程数据 key_B ===
-2025/04/08 10:17:11 [节点A] 开始查找键 key_B 的远程节点
-项目有效，将其移至二级缓存
-节点A: 获取远程键 key_B 成功: 这是节点B的数据
+分布式缓存是一种 独立部署的缓存服务，与应用进程分离，多个应用实例共享同一份缓存数据，典型实现包括 Redis、Memcached、etcd。
 
-=== 节点A：尝试获取远程数据 key_C ===
-2025/04/08 10:17:11 [节点A] 开始查找键 key_C 的远程节点
-节点A: 获取远程键 key_C 成功: 这是节点C的数据
-```
+优势
 
-B 进程：
+1、支持大规模存储：
 
-```bash
-go run example/test.go -port 8002 -node B
-2025/04/08 10:16:39 [节点B] 启动，地址: :8002
-INFO[0000] Successfully created client for 172.22.152.216:8001 
-INFO[0000] Discovered service at 172.22.152.216:8001    
-INFO[0000] Created cache group [test] with cacheBytes=2097152, expiration=0s 
-INFO[0000] [KamaCache] registered peers for group [test] 
-2025/04/08 10:16:39 [节点B] 等待节点注册...
-2025/04/08 10:16:39 [节点B] 开始启动服务...
-INFO[0000] Server starting at :8002                     
-INFO[0000] Service registered: kama-cache at 172.22.152.216:8002 
-INFO[0000] Successfully created client for 172.22.152.216:8002 
-INFO[0000] New service discovered at 172.22.152.216:8002 
-INFO[0003] Successfully created client for 172.22.152.216:8003 
-INFO[0003] New service discovered at 172.22.152.216:8003 
+  * 缓存数据分布在多个服务器上，不受单机内存限制，可扩展存储空间。
+  * 例如：Redis Cluster 支持横向扩展，通过分片技术存储 TB 级数据。
 
-=== 节点B：设置本地数据 ===
-INFO[0005] Cache initialized with type lru2, max bytes: 2097152 
-节点B: 设置键 key_B 成功
-2025/04/08 10:16:44 [节点B] 等待其他节点准备就绪...
-INFO[0005] grpc set request resp: value:"这是节点B的数据"      
-项目有效，将其移至二级缓存
-2025/04/08 10:17:14 当前已发现的节点:
-2025/04/08 10:17:14 - 172.22.152.216:8001
-2025/04/08 10:17:14 - 172.22.152.216:8002
-2025/04/08 10:17:14 - 172.22.152.216:8003
+2、数据一致性更高：
+  * 由于所有应用节点共享同一份缓存数据，不同服务器间的缓存一致性更容易保证。
+  * 例如：所有服务器都访问 Redis，数据变更时只需更新 Redis 即可同步到所有应用实例。
 
-=== 节点B：获取本地数据 ===
-直接查询本地缓存...
-缓存统计: map[cache_closed:false cache_hit_rate:1 cache_hits:1 cache_initialized:true cache_misses:0 cache_size:2 closed:false expiration:0s hit_rate:1 loader_errors:0 loader_hits:0 loads:0 local_hits:1 local_misses:0 naest peer_hits:0 peer_misses:0]
-项目有效，将其移至二级缓存
-节点B: 获取本地键 key_B 成功: 这是节点B的数据
+3、高可用性：
 
-=== 节点B：尝试获取远程数据 key_A ===
-2025/04/08 10:17:14 [节点B] 开始查找键 key_A 的远程节点
-节点B: 获取远程键 key_A 成功: 这是节点A的数据
+* Redis Sentinel 或 主从复制 方案可提供 缓存高可用性，即使某个缓存节点宕机，仍可快速切换到备用节点，避免单点故障。
+* 持久化机制（AOF/RDB） 使 Redis 在服务器重启后仍能恢复数据，保证缓存数据不会丢失。
 
-=== 节点B：尝试获取远程数据 key_C ===
-2025/04/08 10:17:14 [节点B] 开始查找键 key_C 的远程节点
-节点B: 获取远程键 key_C 成功: 这是节点C的数据
-```
-
-C 进程：
-
-```bash
-go run example/test.go -port 8003 -node C
-2025/04/08 10:16:42 [节点C] 启动，地址: :8003
-INFO[0000] Successfully created client for 172.22.152.216:8001 
-INFO[0000] Discovered service at 172.22.152.216:8001    
-INFO[0000] Successfully created client for 172.22.152.216:8002 
-INFO[0000] Discovered service at 172.22.152.216:8002    
-INFO[0000] Created cache group [test] with cacheBytes=2097152, expiration=0s 
-INFO[0000] [KamaCache] registered peers for group [test] 
-2025/04/08 10:16:42 [节点C] 等待节点注册...
-2025/04/08 10:16:42 [节点C] 开始启动服务...
-INFO[0000] Server starting at :8003                     
-INFO[0000] Service registered: kama-cache at 172.22.152.216:8003 
-INFO[0000] Successfully created client for 172.22.152.216:8003 
-INFO[0000] New service discovered at 172.22.152.216:8003 
-
-=== 节点C：设置本地数据 ===
-INFO[0005] Cache initialized with type lru2, max bytes: 2097152 
-节点C: 设置键 key_C 成功
-2025/04/08 10:16:47 [节点C] 等待其他节点准备就绪...
-INFO[0005] grpc set request resp: value:"这是节点C的数据"      
-2025/04/08 10:17:17 当前已发现的节点:
-2025/04/08 10:17:17 - 172.22.152.216:8001
-2025/04/08 10:17:17 - 172.22.152.216:8002
-2025/04/08 10:17:17 - 172.22.152.216:8003
-
-=== 节点C：获取本地数据 ===
-直接查询本地缓存...
-缓存统计: map[cache_closed:false cache_hit_rate:0 cache_hits:0 cache_initialized:true cache_misses:0 cache_size:1 closed:false expiration:0s loader_errors:0 loader_hits:0 loads:0 local_hits:0 local_misses:0 name:test peets:0 peer_misses:0]
-项目有效，将其移至二级缓存
-节点C: 获取本地键 key_C 成功: 这是节点C的数据
-
-=== 节点C：尝试获取远程数据 key_A ===
-2025/04/08 10:17:17 [节点C] 开始查找键 key_A 的远程节点
-节点C: 获取远程键 key_A 成功: 这是节点A的数据
-
-=== 节点C：尝试获取远程数据 key_B ===
-2025/04/08 10:17:17 [节点C] 开始查找键 key_B 的远程节点
-节点C: 获取远程键 key_B 成功: 这是节点B的数据
-```
+4、适用于分布式系统：
+* 现代应用通常采用 多实例部署（如 Kubernetes 微服务架构），本地缓存难以满足数据共享需求，而 分布式缓存天然适用于多实例环境。
 
 
-## 配置说明
+## 项目专栏精讲
 
-### 服务器配置
-```go
-type ServerOptions struct {
-    EtcdEndpoints []string      // etcd 端点
-    DialTimeout   time.Duration // 连接超时
-    MaxMsgSize    int          // 最大消息大小
-}
-```
+该项目的专栏是[知识星球](https://programmercarl.com/other/kstar.html)录友专享的。
 
-### 缓存组配置
-```go
-group := kamacache.NewGroup("users", 2<<20, getter,
-  kamacache.WithExpiration(time.Hour),    // 设置过期时间
-)
-```
+项目专栏依然是将 「简历写法」给大家列出来了，大家学完就可以参考这个来写简历：
 
-## 使用示例
+![image](https://file1.kamacoder.com/i/web/20250414101516.png)
 
-### 1. 设置缓存
-```go
-err := group.Set(ctx, "key", []byte("value"))
-```
+做完该项目，面试中大概率会有哪些面试问题，以及如何回答，也列出好了：
 
-### 2. 获取缓存
-```go
-value, err := group.Get(ctx, "key")
-```
+![image](https://file1.kamacoder.com/i/web/20250414101617.png)
 
-### 3. 删除缓存
-```go
-err := group.Delete(ctx, "key")
-```
+专栏中的项目面试题都掌握的话，这个项目在面试中基本没问题。
 
-## 注意事项
+项目架构：
 
-1. 确保 etcd 服务可用
-2. 合理配置缓存容量和过期时间
-3. 节点地址不要重复
-4. 建议在生产环境配置 TLS
+![image](https://file1.kamacoder.com/i/web/20250414101706.png)
 
-## 性能优化
+本项目主要模块：缓存组、缓存淘汰与实现、缓存并发、分布式算法之一致性哈希、缓存对外服务化 都做了详细的讲解：
 
-1. 使用一致性哈希实现负载均衡
-2. 异步数据同步减少延迟
-3. 单飞机制避免缓存击穿
-4. 支持批量操作提高吞吐量
+![image](https://file1.kamacoder.com/i/web/20250414101827.png)
 
-## 贡献指南
+![image](https://file1.kamacoder.com/i/web/20250414101856.png)
 
-欢迎提交 Issue 和 Pull Request。
+![image](https://file1.kamacoder.com/i/web/20250414101913.png)
+
+![image](https://file1.kamacoder.com/i/web/20250414101930.png)
+
+
+## 获取本项目专栏
+
+**本文档仅为星球内部专享，大家可以加入[知识星球](https://programmercarl.com/other/kstar.html)里获取，在星球置顶一**
+
 
 ## 许可证
 
