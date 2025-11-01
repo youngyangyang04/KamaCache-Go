@@ -1,7 +1,7 @@
 
 # KamaCache
 
-**本项目目前之前[知识星球](https://programmercarl.com/other/kstar.html)里维护**
+**本项目目前只在[知识星球](https://programmercarl.com/other/kstar.html)里维护，并答疑**
 
 分布式缓存（Go）这个项目在 23年就在星球里发布了。
 
