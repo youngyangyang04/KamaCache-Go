@@ -18,7 +18,7 @@ type Client struct {
 	etcdCli *clientv3.Client
 	conn    *grpc.ClientConn
 	grpcCli pb.KamaCacheClient
-}
+}//12314141414151521515151
 
 var _ Peer = (*Client)(nil)
 
